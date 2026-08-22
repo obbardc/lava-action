@@ -7,6 +7,13 @@ const undici = require('undici');
 const YAML = require('yaml')
 const ColorReset = "\033[0m";
 
+// what a poll returns when the job has not reached a conclusion yet
+const POLL_AGAIN = Symbol("poll again");
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function writeFileWithRetry(fileName, content) {
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
@@ -120,8 +127,21 @@ async function saveArtifacts(jobId, host, lava_token, save_result_as_artifact, r
     }
 }
 
+// fetchAndParse reports on a single poll; keep polling until it says the job
+// has finished. Awaiting the wait rather than handing the next poll to
+// setTimeout keeps the whole run on one promise chain, so a failure inside a
+// later poll reaches the catch in main() instead of going unhandled.
+async function pollUntilFinished(settings) {
+    for (;;) {
+        const outcome = await fetchAndParse(settings);
+        if (outcome !== POLL_AGAIN) {
+            return outcome;
+        }
+        await sleep(settings.poll_interval * 1000);
+    }
+}
+
 async function fetchAndParse(settings) {
-    const pollInterval = settings.poll_interval * 1000;
     const jobStatusPath = "/api/v0.2/jobs/" + settings.jobId + "/";
     const jobLogPath = "/api/v0.2/jobs/" + settings.jobId + "/logs/?start=" + settings.logStart;
 
@@ -131,7 +151,7 @@ async function fetchAndParse(settings) {
     if (jobStatusCode >= 400) {
         console.log("Error retrieving job status");
         await jobStatusBody.dump();
-        return setTimeout(() => fetchAndParse(settings), pollInterval);
+        return POLL_AGAIN;
     }
 
     const jobStatus = await jobStatusBody.json();
@@ -141,7 +161,7 @@ async function fetchAndParse(settings) {
     if (state === "Submitted" || state === "Scheduled") {
         // Don't fetch logs until the job leaves the queue
         console.log("Waiting for job to start");
-        return setTimeout(() => fetchAndParse(settings), pollInterval);
+        return POLL_AGAIN;
     }
 
     const jobLogResponse = await createRequest("GET", new URL(jobLogPath, settings.host), settings.lava_token);
@@ -189,7 +209,7 @@ async function fetchAndParse(settings) {
         return testResults;
     }
 
-    return setTimeout(() => fetchAndParse(settings), pollInterval);
+    return POLL_AGAIN;
 }
 
 
@@ -342,7 +362,7 @@ async function main() {
     }
 
     if ( wait_for_job ) {
-        return await fetchAndParse(settings);
+        return await pollUntilFinished(settings);
     }
     return true
 }
