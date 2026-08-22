@@ -198,7 +198,7 @@ async function fetchAndParse(settings) {
     }
 
     if (state === "Finished") {
-        saveArtifacts(settings.jobId, settings.host, settings.lava_token, settings.save_result_as_artifact, settings.result_file_name);
+        await saveArtifacts(settings.jobId, settings.host, settings.lava_token, settings.save_result_as_artifact, settings.result_file_name);
         printResults(settings.fail_action_on_failure);
         if (health === "Incomplete" || health === "Canceled") {
             if (settings.fail_action_on_incomplete) {
