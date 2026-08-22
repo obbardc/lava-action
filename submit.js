@@ -362,7 +362,17 @@ async function main() {
     }
 
     if ( wait_for_job ) {
-        return await pollUntilFinished(settings);
+        // hand the job to the post step, which cancels it in LAVA if this
+        // step is cut short: a workflow cancellation or a job timeout kills
+        // us where we stand, and LAVA would carry on running a job nobody is
+        // left to read. Only while we wait - a submit-and-go run is meant to
+        // outlive the workflow.
+        core.saveState("lava_job_id", jobId);
+        const results = await pollUntilFinished(settings);
+        // the job reached a conclusion of its own, so there is nothing for
+        // the post step to cancel
+        core.saveState("lava_job_id", "");
+        return results;
     }
     return true
 }
